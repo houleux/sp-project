@@ -1,9 +1,16 @@
-% Load the audio file
-audio_file = '6.wav'; % Replace with your audio file
-[audio, fs] = audioread(audio_file);
+% Load the MP3 file and convert to WAV
+mp3_file = '9.mp3'; % Input MP3 file
+wav_file = '9_converted.wav'; % Output WAV file
+
+% Convert MP3 to WAV
+[audio, fs] = audioread(mp3_file);
+audiowrite(wav_file, audio, fs); % Save the audio as WAV
+
+% Use the WAV file for further processing
+audio_file = wav_file;
 
 % Read the text file (to get the words)
-text_file = '6.txt'; % Replace with your text file
+text_file = '9.txt'; % Replace with your text file
 fid = fopen(text_file, 'r');
 text_data = textscan(fid, '%s', 'Delimiter', '\n');
 fclose(fid);
@@ -15,6 +22,11 @@ frame_size = round(0.025 * fs); % Frame size of 25 ms
 frame_step = round(0.010 * fs); % Frame step of 10 ms
 time = (0:length(audio)-1) / fs; % Time vector for the signal
 
+% Ensure the audio signal is mono
+if size(audio, 2) > 1
+    audio = mean(audio, 2); % Convert stereo to mono by averaging channels
+end
+
 % Square the signal
 squared_signal = audio.^2;
 
@@ -23,7 +35,11 @@ smoothing_window = 200; % Define window size for smoothing
 sinc_filter = sinc(linspace(-4, 4, smoothing_window)); % Create a sinc filter
 sinc_filter = sinc_filter / sum(sinc_filter); % Normalize the filter
 
-% Apply smoothing to the squared signal
+% Ensure the squared_signal is a column vector
+squared_signal = squared_signal(:);
+sinc_filter = sinc_filter(:);
+
+% Apply smoothing using convolution
 smoothed_signal = conv(squared_signal, sinc_filter, 'same');
 
 % Filter the smoothed signal based on the threshold
@@ -56,23 +72,7 @@ end
 disp('Time Stamps of Loud Segments:');
 disp(timestamps);
 
-% % Map the detected loud segments to words (approximation)
-% num_words = length(words);
-% word_duration = time(end) / num_words; % Approx. duration of each word
-% detected_loud_words = {};
-
-% for i = 1:size(timestamps, 1)
-%     % Calculate approximate word indices
-%     start_word_idx = max(1, ceil(timestamps(i, 1) / word_duration));
-%     end_word_idx = min(num_words, ceil(timestamps(i, 2) / word_duration));
-%     detected_loud_words = [detected_loud_words; words(start_word_idx:end_word_idx)];
-% end
-
-% % Display detected loud words
-% disp('Detected Loud Words:');
-% disp(unique(detected_loud_words));
-
-% Plot the squared and smoothed signals along with the threshold
+% Plot the squared and smoothed signals with threshold
 figure;
 plot(time, squared_signal, 'b', 'DisplayName', 'Squared Signal');
 hold on;
