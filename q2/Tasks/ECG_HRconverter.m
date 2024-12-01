@@ -1,5 +1,6 @@
 function HR = ECG_HRconverter(E, ts)
-    [pks, locs] = findpeaks(E,'MinPeakProminence',1);
+    E1 = E.*E.*E;
+    [pks, locs] = findpeaks(E1,'MinPeakProminence',0.3);
     hr1 = ones(1,length(pks));
 
     idx = 2;
@@ -30,7 +31,7 @@ function HR = ECG_HRconverter(E, ts)
 
     n = floor(tt(length(tt))/60);
     HR = ones(1,n);
-    
+
     for l = 1:n
         left = (7680*(l-1))+1;
         right = 7680*l;
