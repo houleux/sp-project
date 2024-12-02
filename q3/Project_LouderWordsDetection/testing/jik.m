@@ -1,68 +1,139 @@
-% Load the audio file
-audio_file = '1.wav'; % Replace with your audio file
-[audio, fs] = audioread(audio_file);
+% Read the audio signal
+[audioSignal, fs] = audioread('8.wav');
 
-% Read the text file (to get the words)
-text_file = '1.txt'; % Replace with your text file
-fid = fopen(text_file, 'r');
-text_data = textscan(fid, '%s', 'Delimiter', '\n');
-fclose(fid);
-words = text_data{1}; % List of words in order
+% Convert stereo to mono if necessary
+if size(audioSignal, 2) > 1
+    audioSignal = mean(audioSignal, 2);  % Averaging channels for mono
+end
 
-% Parameters
-threshold = 0.12; % Set a suitable threshold (adjust based on your data)
-frame_size = round(0.025 * fs); % Frame size of 25 ms
-frame_step = round(0.010 * fs); % Frame step of 10 ms
-time = (0:length(audio)-1) / fs; % Time vector for the signal
+% Read the word data from the text file
+fileID = fopen('8.txt', 'r');
+wordData = textscan(fileID, '%s %f %f %d', 'Delimiter', ' \t', 'MultipleDelimsAsOne', true);
+fclose(fileID);
 
-% Square the signal
-squared_signal = audio.^2;
+words = wordData{1};  % Extract the words
 
-% Smooth the signal using Sinc interpolation
-smoothing_window = 200; % Define window size for smoothing
-sinc_filter = sinc(linspace(-4, 4, smoothing_window)); % Create a sinc filter
-sinc_filter = sinc_filter / sum(sinc_filter); % Normalize the filter
+% Define parameters for windowing
+windowDuration = 0.025;  % 25 ms window
+windowSamples = round(windowDuration * fs);  % Window length in samples
+hopLength = round(windowSamples / 2);  % 50% overlap for hop length
 
-% Apply smoothing to the squared signal
-smoothed_signal = conv(squared_signal, sinc_filter, 'same');
+% Calculate the energy for each window
+numWindows = ceil(length(audioSignal) / hopLength);
+windowEnergy = zeros(1, numWindows);
 
-% Filter the smoothed signal based on the threshold
-loud_regions = smoothed_signal > threshold;
+for i = 1:numWindows
+    startIdx = (i - 1) * hopLength + 1;
+    endIdx = min(startIdx + windowSamples - 1, length(audioSignal));
+    audioWindow = audioSignal(startIdx:endIdx);
+    windowEnergy(i) = sum(audioWindow.^2);  % Sum of squares (energy)
+end
 
-% Initialize time stamps array for loud segments
-timestamps = [];
+% Normalize the energy values
+windowEnergy = windowEnergy / max(windowEnergy);
 
-% Detect continuous loud regions
-is_loud = false;
-for i = 1:length(loud_regions)
-    if loud_regions(i) && ~is_loud
-        % Start of a loud region
-        is_loud = true;
-        start_time = time(i);
-    elseif ~loud_regions(i) && is_loud
-        % End of a loud region
-        is_loud = false;
-        end_time = time(i);
-        timestamps = [timestamps; start_time, end_time]; % Add time stamps
+% Energy threshold to detect speech regions
+energyThreshold = 0.05;
+speechRegionFlags = windowEnergy > energyThreshold;
+
+% Detect start and end of speech segments
+speechChanges = find(diff([0, speechRegionFlags, 0]) ~= 0);
+speechSegments = reshape(speechChanges, 2, [])';  % Pair start and end indices
+speechSegments = speechSegments * hopLength;  % Convert to sample indices
+
+% Initialize arrays for RMS and loudness
+numSpeechSegments = size(speechSegments, 1);
+rmsValues = zeros(1, numSpeechSegments);
+loudnessFlags = zeros(1, numSpeechSegments);
+
+% Adjust the number of speech segments to match the number of words
+numWords = length(words);
+if numSpeechSegments > numWords
+    speechSegments = speechSegments(1:numWords, :);
+elseif numSpeechSegments < numWords
+    speechSegments = [speechSegments; zeros(numWords - numSpeechSegments, 2)];
+end
+
+% RMS threshold to classify loud words
+rmsThreshold = 0.12;
+
+% Calculate RMS energy for each speech segment and classify loudness
+for i = 1:numSpeechSegments
+    startIdx = speechSegments(i, 1);
+    endIdx = speechSegments(i, 2);
+    
+    % Ensure indices are within bounds of audioSignal
+    if startIdx > 0 && endIdx <= length(audioSignal)
+        segment = audioSignal(startIdx:endIdx);
+        rmsEnergy = sqrt(mean(segment.^2));  % RMS energy for the segment
+        rmsValues(i) = rmsEnergy;
+
+        % Classify as loud or normal based on RMS threshold
+        if rmsEnergy > rmsThreshold
+            loudnessFlags(i) = 1;  % Loud word
+        else
+            loudnessFlags(i) = 0;  % Normal word
+        end
+    elseif startIdx > length(audioSignal)
+        % If start index is out of bounds, skip this segment
+        fprintf('Warning: Segment %d has a start index beyond the signal length.\n', i);
+        continue;
+    elseif endIdx > length(audioSignal)
+        % If end index is out of bounds, clip it to the end of the signal
+        segment = audioSignal(startIdx:end);  % From start to end of signal
+        rmsEnergy = sqrt(mean(segment.^2));  % RMS energy for the segment
+        rmsValues(i) = rmsEnergy;
+
+        % Classify as loud or normal based on RMS threshold
+        if rmsEnergy > rmsThreshold
+            loudnessFlags(i) = 1;  % Loud word
+        else
+            loudnessFlags(i) = 0;  % Normal word
+        end
     end
 end
 
-% Add any ongoing loud region at the end
-if is_loud
-    timestamps = [timestamps; start_time, time(end)];
+% Ensure the number of RMS values matches the number of words
+rmsValues = rmsValues(1:numWords);
+
+% Display the results in a table format
+fprintf("Word       | RMS Energy        | Loudness\n");
+fprintf("--------------------------------------------\n");
+for i = 1:numWords
+    fprintf("%-10s | %-16f | %d\n", words{i}, rmsValues(i), loudnessFlags(i));
+end
+disp("--------------------------------------------");
+
+% Plot 1: Bar chart of RMS energy for each word
+figure;
+bar(rmsValues, 'FaceColor', 'blue');
+hold on;
+
+% Highlight loud words in red
+for i = 1:numWords
+    if rmsValues(i) > rmsThreshold
+        bar(i, rmsValues(i), 'FaceColor', 'red');
+    end
 end
 
-% Print the time stamps for loud segments
-disp('Time Stamps of Loud Segments:');
-disp(timestamps);
- 
+% Add a threshold line to the plot
+yline(rmsThreshold, 'r--', 'LineWidth', 2, 'Label', 'Threshold');
+title('RMS Energy of Words');
+xlabel('Words');
+ylabel('RMS Energy');
+xticks(1:numWords);
+xticklabels(words);
+xtickangle(45);  % Rotate x-axis labels for readability
+legend('Normal Words', 'Loud Words (> Threshold)', 'Threshold', 'Location', 'northwest');
+hold off;
+
+% Plot 2: Energy envelope of the entire audio signal
 figure;
-plot(time, squared_signal, 'b', 'DisplayName', 'Squared Signal');
+plot(windowEnergy, 'b');
 hold on;
-plot(time, smoothed_signal, 'g', 'DisplayName', 'Smoothed Signal');
-yline(threshold, 'r--', 'Threshold', 'DisplayName', 'Threshold');
-xlabel('Time (s)');
-ylabel('Signal Amplitude');
-title('Squared and Smoothed Signal with Threshold');
-legend;
+yline(energyThreshold, 'r--', 'LineWidth', 2, 'Label', 'Energy Threshold');
+title('Energy Envelope');
+xlabel('Time Windows');
+ylabel('Normalized Energy');
+legend('Energy', 'Threshold');
 hold off;
