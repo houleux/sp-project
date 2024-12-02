@@ -33,9 +33,8 @@ function HR = ECG_HRconverter(E, ts)
     HR = ones(1,n);
 
     for l = 1:n
-        left = (7680*(l-1))+1;
         right = 7680*l;
 
-        HR(l) = mean(h(1,(left:right)));
+        HR(l) = mean(h(1,(1:right)));
     end
 end
